@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Studio</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+
+/* ── CSS variables: dark (default) ── */
+:root{
+  --bg:   #000000;
+  --fg:   255,255,255;   /* RGB for rgba() usage */
+  --dot:  #ffffff;       /* particle fill in light mode override */
+  --badge-dot: #fff;
+}
+body.light{
+  --bg:   #F7F6F5;
+  --fg:   0,0,0;
+  --dot:  #000000;
+  --badge-dot: #000;
+}
+
+body{
+  background:var(--bg);
+  overflow:hidden;width:100vw;height:100vh;
+  font-family:'Courier New',Courier,monospace;cursor:grab;
+  transition:background .35s;
+}
+body.dragging{cursor:grabbing}
+body.wave-mode{cursor:default}
+canvas{display:block;position:fixed;inset:0}
+
+/* ── top tabs ── */
+#tabs{
+  position:fixed;top:28px;left:50%;transform:translateX(-50%);
+  display:flex;gap:8px;z-index:20;
+}
+.tab{
+  background:transparent;
+  border:1px solid rgba(var(--fg),.22);
+  color:rgba(var(--fg),.38);
+  padding:7px 20px;border-radius:999px;cursor:pointer;
+  font-family:'Courier New',Courier,monospace;
+  font-size:9px;letter-spacing:.20em;text-transform:uppercase;
+  transition:border-color .2s,color .2s,background .2s;
+  outline:none;white-space:nowrap;
+}
+.tab:hover{border-color:rgba(var(--fg),.6);color:rgba(var(--fg),.8)}
+.tab.on{border-color:rgba(var(--fg),1);color:rgba(var(--fg),1);background:rgba(var(--fg),.07)}
+
+/* ── frozen badge ── */
+#frozen-badge{
+  position:fixed;top:24px;right:28px;font-size:8px;
+  letter-spacing:.22em;color:rgba(var(--fg),.4);text-transform:uppercase;
+  opacity:0;transition:opacity .4s;display:flex;align-items:center;gap:7px;
+  pointer-events:none;z-index:20}
+#frozen-badge em{display:block;width:5px;height:5px;border-radius:50%;
+  background:var(--badge-dot);font-style:normal;animation:bl 1.4s ease-in-out infinite}
+#frozen-badge.show{opacity:1}
+@keyframes bl{0%,100%{opacity:.7}50%{opacity:.1}}
+
+/* ── bottom pill buttons ── */
+#ui{
+  position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
+  display:flex;gap:12px;align-items:center;z-index:20;
+  transition:opacity .3s;
+}
+.btn{
+  background:transparent;
+  border:1.5px solid rgba(var(--fg),.30);
+  color:rgba(var(--fg),.55);
+  padding:9px 24px;border-radius:999px;cursor:pointer;
+  font-family:'Courier New',Courier,monospace;
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  transition:border-color .22s,color .22s,background .22s;
+  white-space:nowrap;outline:none;line-height:1;
+}
+.btn:hover{border-color:rgba(var(--fg),.80);color:rgba(var(--fg),1);background:rgba(var(--fg),.05)}
+.btn.active,.btn.fon{border-color:rgba(var(--fg),1);color:rgba(var(--fg),1);background:rgba(var(--fg),.08)}
+#dl-btn{display:none}
+#dl-btn.show{display:block}
+#rec-btn{display:none}
+#rec-btn.show{display:block}
+#rec-btn.recording{border-color:#ff4444;color:#ff4444;animation:recpulse 1s ease-in-out infinite}
+@keyframes recpulse{0%,100%{opacity:1}50%{opacity:0.5}}
+
+/* ── theme toggle ── */
+#theme-btn{
+  position:fixed;top:24px;left:28px;z-index:20;
+  background:transparent;
+  border:1px solid rgba(var(--fg),.22);
+  color:rgba(var(--fg),.45);
+  width:36px;height:36px;border-radius:50%;
+  cursor:pointer;font-size:14px;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .22s,color .22s,background .22s;
+  outline:none;
+}
+#theme-btn:hover{border-color:rgba(var(--fg),.7);color:rgba(var(--fg),1);background:rgba(var(--fg),.05)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></svg></button>
+
+<div id="tabs">
+  <button class="tab on" onclick="switchTab('sphere')">Sphere</button>
+  <button class="tab"    onclick="switchTab('wave')">Sound Wave</button>
+  <button class="tab"    onclick="switchTab('logo')">Logo</button>
+  <button class="tab"    onclick="switchTab('ascii')">ASCII</button>
+  <button class="tab"    onclick="switchTab('dots')">Dots</button>
+  <button class="tab"    onclick="switchTab('emoji')">Emoji</button>
+</div>
+
+<div id="frozen-badge"><em></em>FROZEN</div>
+
+<div id="ui">
+  <button class="btn" id="mic-btn"  onclick="toggleMic()">&#9711;&thinsp; Mic</button>
+  <button class="btn" id="frz-btn"  onclick="toggleFreeze()">&#9646;&#9646;&thinsp; Freeze</button>
+  <button class="btn" id="dl-btn"   onclick="downloadHD()">&#8595;&thinsp; Save 2048px</button>
+  <button class="btn" id="rec-btn"   onclick="toggleRecord()">&#9679;&thinsp; Record</button>
+</div>
+
+<script>
+/* ══════════════════════════════════════
+   CANVAS
+══════════════════════════════════════ */
+var C=document.getElementById('c'), X=C.getContext('2d');
+var W,H,cx,cy,R;
+function resize(){
+  W=C.width=window.innerWidth; H=C.height=window.innerHeight;
+  cx=W/2; cy=H/2; R=Math.min(W,H)*0.34;
+}
+resize(); window.addEventListener('resize',resize);
+
+/* theme helpers — used by all draw functions */
+function bgColor(){ return isLight ? '#F7F6F5' : '#000000'; }
+/* particle grey: in dark mode white=255, in light mode black=0
+   v is 0-255 brightness value computed per-particle              */
+function dotColor(v){
+  if(!isLight) return 'rgb('+v+','+v+','+v+')';
+  // invert: bright particle → dark dot on light bg
+  var inv=255-v;
+  return 'rgb('+inv+','+inv+','+inv+')';
+}
+
+/* ══════════════════════════════════════
+   TABS
+══════════════════════════════════════ */
+var currentTab='sphere';
+function switchTab(name){
+  currentTab=name;
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('on');});
+  event.target.classList.add('on');
+  // freeze/dl only on sphere
+  var dl=document.getElementById('dl-btn');
+  var frz=document.getElementById('frz-btn');
+  document.getElementById('rec-btn').classList.add('show');
+  if(name==='wave'||name==='logo'||name==='ascii'||name==='dots'||name==='emoji'){
+    document.body.classList.add('wave-mode');
+    if(frozen) toggleFreeze();
+    frz.style.display='none';
+    dl.style.display='block';
+    dl.classList.add('show');
+  } else {
+    document.body.classList.remove('wave-mode');
+    frz.style.display='';
+    dl.style.display='';
+    if(!frozen) dl.classList.remove('show');
+  }
+  document.getElementById('rec-btn').classList.add('show');
+}
+
+/* ══════════════════════════════════════
+   THEME
+══════════════════════════════════════ */
+var isLight=false;
+function toggleTheme(){
+  isLight=!isLight;
+  document.body.classList.toggle('light', isLight);
+  // icon stays the same SVG always
+}
+
+// show record button on load
+document.addEventListener('DOMContentLoaded',function(){
+  document.getElementById('rec-btn').classList.add('show');
+});
+
+/* ══════════════════════════════════════
+   VALUE NOISE
+══════════════════════════════════════ */
+function hash(n){return((Math.sin(n)*43758.5453)%1+1)%1;}
+function vn(x,y,z){
+  var ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z);
+  var fx=x-ix,fy=y-iy,fz=z-iz;
+  var ux=fx*fx*(3-2*fx),uy=fy*fy*(3-2*fy),uz=fz*fz*(3-2*fz);
+  function h(a,b,c){return hash(a+b*57+c*131);}
+  function li(t,a,b){return a+t*(b-a);}
+  return li(uz,
+    li(uy,li(ux,h(ix,iy,iz),h(ix+1,iy,iz)),li(ux,h(ix,iy+1,iz),h(ix+1,iy+1,iz))),
+    li(uy,li(ux,h(ix,iy,iz+1),h(ix+1,iy,iz+1)),li(ux,h(ix,iy+1,iz+1),h(ix+1,iy+1,iz+1))));
+}
+
+/* ══════════════════════════════════════
+   SPHERE PARTICLES
+══════════════════════════════════════ */
+var N=5500, pts=[];
+(function(){
+  var g=Math.PI*(1+Math.sqrt(5));
+  for(var i=0;i<N;i++){
+    var phi=Math.acos(1-2*(i+0.5)/N),th=g*i;
+    pts.push({
+      bx:Math.sin(phi)*Math.cos(th),
+      by:Math.sin(phi)*Math.sin(th),
+      bz:Math.cos(phi),
+      no:Math.random()*100,
+      sz:1.1+Math.random()*0.9,
+      sr:Math.random()
+    });
+  }
+})();
+
+/* ══════════════════════════════════════
+   WAVE PARTICLES
+   Multiple horizontal rows of dots.
+   Each row has its own frequency band.
+   Dots displace vertically by the band amplitude.
+══════════════════════════════════════ */
+var WAVE_ROWS = 12;    // stacked layers for density/depth
+var WAVE_COLS = 220;   // dots per line
+var wavePts   = [];
+(function(){
+  for(var r=0;r<WAVE_ROWS;r++){
+    for(var c=0;c<WAVE_COLS;c++){
+      wavePts.push({
+        row:r, col:c,
+        phase: Math.random()*Math.PI*2,
+        sz: 1.0+Math.random()*0.8,
+        sr: Math.random()
+      });
+    }
+  }
+})();
+
+/* ══════════════════════════════════════
+   AUDIO
+══════════════════════════════════════ */
+var analyser=null, tdData=null, fdata=null, micOn=false;
+function toggleMic(){
+  if(micOn)return; micOn=true;
+  var b=document.getElementById('mic-btn'); b.textContent='requesting…';
+  navigator.mediaDevices.getUserMedia({audio:true,video:false})
+    .then(function(stream){
+      var ac=new(window.AudioContext||window.webkitAudioContext)();
+      var src=ac.createMediaStreamSource(stream);
+      analyser=ac.createAnalyser();
+      analyser.fftSize=2048;
+      analyser.smoothingTimeConstant=0.80;
+      fdata  =new Uint8Array(analyser.frequencyBinCount);
+      tdData =new Uint8Array(analyser.fftSize);
+      src.connect(analyser);
+      b.textContent='⬤ Mic On'; b.classList.add('active');
+    }).catch(function(){b.textContent='denied';micOn=false;});
+}
+function getAmp(){
+  if(!analyser)return 0;
+  analyser.getByteFrequencyData(fdata);
+  var end=Math.floor(fdata.length*0.35),s=0;
+  for(var i=1;i<end;i++)s+=fdata[i];
+  return(s/(end-1))/255;
+}
+// returns freq amplitude for a band [0..1]
+function getBandAmp(normStart, normEnd){
+  if(!analyser)return 0;
+  var len=fdata.length;
+  var s=Math.floor(normStart*len), e=Math.floor(normEnd*len);
+  if(e<=s) e=s+1; var sum=0;
+  for(var i=s;i<e;i++) sum+=fdata[i];
+  return(sum/(e-s))/255;
+}
+// waveform time-domain (−1..1 per sample)
+function getWaveform(){
+  if(!analyser||!tdData) return null;
+  analyser.getByteTimeDomainData(tdData);
+  return tdData;
+}
+
+/* ══════════════════════════════════════
+   ROTATION (sphere only)
+══════════════════════════════════════ */
+var RX=0.28,RY=0,tRX=0.28,tRY=0,drag=false,lmx=0,lmy=0;
+C.addEventListener('mousedown',function(e){
+  if(currentTab!=='sphere')return;
+  drag=true;lmx=e.clientX;lmy=e.clientY;document.body.classList.add('dragging');
+});
+window.addEventListener('mouseup',function(){drag=false;document.body.classList.remove('dragging');});
+window.addEventListener('mousemove',function(e){
+  if(!drag)return;
+  tRY+=(e.clientX-lmx)*0.006;tRX+=(e.clientY-lmy)*0.006;
+  lmx=e.clientX;lmy=e.clientY;
+});
+C.addEventListener('touchstart',function(e){
+  if(currentTab!=='sphere')return;
+  drag=true;lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;
+},{passive:true});
+window.addEventListener('touchend',function(){drag=false;});
+window.addEventListener('touchmove',function(e){
+  if(!drag)return;
+  tRY+=(e.touches[0].clientX-lmx)*0.006;tRX+=(e.touches[0].clientY-lmy)*0.006;
+  lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;
+},{passive:true});
+
+function rot(bx,by,bz,rx,ry){
+  var y1=by*Math.cos(rx)-bz*Math.sin(rx),z1=by*Math.sin(rx)+bz*Math.cos(rx);
+  var x2=bx*Math.cos(ry)+z1*Math.sin(ry),z2=-bx*Math.sin(ry)+z1*Math.cos(ry);
+  return[x2,y1,z2];
+}
+
+/* ══════════════════════════════════════
+   DRAW — SPHERE
+══════════════════════════════════════ */
+var EDGE_POW=2.2;
+function drawSphere(c2d,cW,cH,CCX,CCY,cR,useT,useAmp,useRX,useRY){
+  c2d.fillStyle=bgColor(); c2d.fillRect(0,0,cW,cH);
+  var fov=Math.min(cW,cH)*1.15;
+  var list=[];
+  for(var i=0;i<N;i++){
+    var p=pts[i];
+    var nt=useT*0.11;
+    var n0=vn(p.bx*1.9+nt,       p.by*1.9+nt*0.83, p.bz*1.9+p.no);
+    var n1=vn(p.bx*2.1+7+nt*0.9, p.by*2.1+3+nt,    p.bz*2.1+p.no+5);
+    var warp=(n0*2-1)*0.028+(n1*2-1)*0.014+useAmp*0.055;
+    var r=cR*(1+warp);
+    var rv=rot(p.bx,p.by,p.bz,useRX,useRY);
+    var rx3=rv[0],ry3=rv[1],rz=rv[2];
+    if(rz<=0.0) continue;
+    var zOff=fov*1.6,dep=rz*cR+zOff,sc=fov/dep;
+    var sx=CCX+rx3*r*sc, sy=CCY+ry3*r*sc;
+    var edge=1.0-rz, shell=Math.pow(edge,EDGE_POW);
+    var fresnel=Math.exp(-rz*rz*30)*0.90;
+    var bright=Math.min(1.0,shell*0.65+fresnel);
+    var base_alpha=p.sr<0.68?(0.80+shell*0.20):(0.12+shell*0.28);
+    var alpha=base_alpha*Math.pow(shell,0.6);
+    if(alpha<0.02) continue;
+    var rimBoost=rz<0.18?1.4:1.0;
+    var psz=p.sz*rimBoost*Math.max(0.3,sc*cR*0.006);
+    var v=Math.floor(70+bright*183);
+    list.push({sx:sx,sy:sy,rz:rz,alpha:Math.min(alpha,1),psz:psz,v:v});
+  }
+  list.sort(function(a,b){return a.rz-b.rz;});
+  for(var d=0;d<list.length;d++){
+    var it=list[d];
+    c2d.globalAlpha=it.alpha;
+    c2d.fillStyle=dotColor(it.v);
+    c2d.beginPath(); c2d.arc(it.sx,it.sy,it.psz*0.5,0,Math.PI*2); c2d.fill();
+  }
+  c2d.globalAlpha=1;
+}
+
+/* ══════════════════════════════════════
+   DRAW — SOUND WAVE (particle grid)
+
+   Layout: WAVE_ROWS horizontal bands filling the canvas.
+   Each row maps to a frequency band.
+   Each dot in the row displaces vertically by:
+     • frequency amplitude of that band
+     • + noise shimmer
+     • + traveling wave phase per column
+
+   Brightness = amplitude of that band.
+   Row spacing uses the full canvas height.
+   Horizontal dot spacing fills canvas width.
+══════════════════════════════════════ */
+function drawWave(c2d,cW,cH,useT,useAmp){
+  c2d.fillStyle=bgColor(); c2d.fillRect(0,0,cW,cH);
+
+  // single band centered vertically
+  var centerY = cH * 0.5;
+  var marginX = cW * 0.05;
+  var areaW   = cW - marginX*2;
+  var colW    = areaW / (WAVE_COLS-1);
+
+  // max displacement: tall wave
+  var maxDisp = cH * 0.26;
+
+  // overall amplitude from mic or synthetic
+  var masterAmp;
+  if(analyser){
+    masterAmp = Math.min(1, getBandAmp(0, 0.5)*2.2);
+  } else {
+    masterAmp = 0.35 + 0.22*Math.sin(useT*0.9) + 0.12*Math.sin(useT*2.1);
+    masterAmp = Math.max(0, Math.min(1, masterAmp));
+  }
+
+  // per-column amplitude from freq data or synthetic
+  var colAmps = new Array(WAVE_COLS);
+  for(var c=0;c<WAVE_COLS;c++){
+    var norm = c/(WAVE_COLS-1);
+    if(analyser){
+      colAmps[c] = Math.min(1, getBandAmp(norm*0.6, norm*0.6+0.6/WAVE_COLS+0.008)*2.5);
+    } else {
+      // rich synthetic: primary + harmonics + noise shimmer
+      colAmps[c] =
+        0.45*Math.abs(Math.sin(norm*Math.PI*5   - useT*1.4))
+       +0.28*Math.abs(Math.sin(norm*Math.PI*11  - useT*2.2))
+       +0.18*Math.abs(Math.sin(norm*Math.PI*19  - useT*3.1))
+       +0.12*Math.abs(Math.sin(norm*Math.PI*3   + useT*0.8));
+      colAmps[c] = Math.min(1, colAmps[c]);
+    }
+  }
+
+  // WAVE_ROWS stacked layers — offset slightly so they form a thick ribbon
+  var layerSpread = Math.min(cH*0.012, 6);  // vertical offset between layers
+
+  for(var k=0;k<wavePts.length;k++){
+    var p=wavePts[k];
+    var col=p.col, row=p.row;
+
+    var colNorm = col/(WAVE_COLS-1);
+    var cAmp    = colAmps[col];
+
+    // primary wave: traveling left→right
+    var ph1 = colNorm*Math.PI*8 - useT*2.0 + p.phase*0.3;
+    // secondary counter-wave
+    var ph2 = colNorm*Math.PI*14 + useT*1.4 + p.phase*0.5;
+
+    var dispY = Math.sin(ph1)*cAmp*maxDisp*0.75
+              + Math.sin(ph2)*cAmp*maxDisp*0.25;
+
+    // layer offset: rows spread around center symmetrically
+    var layerOff = (row - (WAVE_ROWS-1)*0.5) * layerSpread;
+
+    var sx = marginX + col * colW;
+    var sy = centerY + dispY + layerOff;
+
+    // brightness: strong floor so wave is always visible
+    var bright = Math.min(1.0, 0.40 + cAmp*0.60);
+
+    // alpha: solid floor so dots are visible even when quiet
+    var alpha;
+    if(p.sr < 0.72){
+      alpha = 0.70 + bright*0.30;
+    } else {
+      alpha = 0.25 + bright*0.35;
+    }
+    // fade edges horizontally (softer fade)
+    var edgeFade = Math.sin(colNorm*Math.PI);
+    alpha *= (0.65 + edgeFade*0.35);
+
+    if(alpha < 0.025) continue;
+
+    var v   = Math.floor(75 + bright*178);
+    var psz = p.sz * Math.max(0.5, 0.8 + cAmp*0.9);
+
+    c2d.globalAlpha = Math.min(alpha, 1);
+    c2d.fillStyle   = dotColor(v);
+    c2d.beginPath(); c2d.arc(sx, sy, psz*0.5, 0, Math.PI*2); c2d.fill();
+  }
+  c2d.globalAlpha=1;
+}
+
+
+/* ══════════════════════════════════════
+   LOGO — particles sitting on the S-path
+   Same visual language as sphere/wave:
+   small circles, noise warp, solid+ghost mix,
+   audio-reactive subtle pulse.
+══════════════════════════════════════ */
+var logoPts=[], logoReady=false;
+(function(){
+  var ns='http://www.w3.org/2000/svg';
+  var sv=document.createElementNS(ns,'svg');
+  sv.setAttribute('viewBox','0 0 144.41 78.2');
+  sv.style.cssText='position:absolute;left:-9999px;visibility:hidden';
+  document.body.appendChild(sv);
+  var pa=document.createElementNS(ns,'path');
+  pa.setAttribute('d','M39.1,6h66.2c18.28,0,33.1,14.82,33.1,33.1h0c0,18.28-14.82,33.1-33.1,33.1h0c-18.28,0-33.1-14.82-33.1-33.1h0c0-18.28-14.82-33.1-33.1-33.1h0C20.82,6,6,20.82,6,39.1h0c0,18.28,14.82,33.1,33.1,33.1h66.2');
+  sv.appendChild(pa);
+  var total=pa.getTotalLength();
+
+  /* ── same grid structure as wave tab ──
+     LOGO_ROWS = stacked layers (like WAVE_ROWS=12)
+     each point along the path = one "column" (like WAVE_COLS)
+     particles live in a row×col grid mapped onto the path            */
+  var LOGO_ROWS=8, LOGO_COLS=260;
+  for(var r=0;r<LOGO_ROWS;r++){
+    for(var c=0;c<LOGO_COLS;c++){
+      var tNorm=c/(LOGO_COLS-1);
+      var pt=pa.getPointAtLength(total*tNorm);
+      logoPts.push({
+        x: pt.x, y: pt.y,
+        t: tNorm,          // 0..1 along path
+        row: r, col: c,
+        phase: Math.random()*Math.PI*2,
+        sz: 1.0+Math.random()*0.8,
+        sr: Math.random()
+      });
+    }
+  }
+  document.body.removeChild(sv);
+  logoReady=true;
+})();
+
+var LOGO_ROWS=8, LOGO_COLS=260;   // must match init above
+
+function drawLogo(c2d,cW,cH,useT,useAmp){
+  c2d.fillStyle=bgColor(); c2d.fillRect(0,0,cW,cH);
+  if(!logoReady) return;
+
+  var pad=0.12;
+  var scale=Math.min(cW*(1-pad*2)/144.41, cH*(1-pad*2)/78.2);
+  var ox=(cW-144.41*scale)*0.5;
+  var oy=(cH-78.2*scale)*0.5;
+
+  /* max displacement in screen px along the path normal —
+     mirrors maxDisp = cH*0.26 in wave but proportional to logo size  */
+  var logoH = 78.2*scale;
+  var maxDisp = logoH*0.07;
+
+  /* layer spread — same as wave's layerSpread */
+  var layerSpread = Math.min(logoH*0.010, 5);
+
+  /* per-column amplitude — identical logic to drawWave colAmps */
+  var colAmps=new Array(LOGO_COLS);
+  for(var c=0;c<LOGO_COLS;c++){
+    var norm=c/(LOGO_COLS-1);
+    if(analyser){
+      colAmps[c]=Math.min(1,getBandAmp(norm*0.6, norm*0.6+0.6/LOGO_COLS+0.008)*2.5);
+    } else {
+      colAmps[c]=
+        0.42*Math.abs(Math.sin(norm*Math.PI*5  -useT*1.0))
+       +0.26*Math.abs(Math.sin(norm*Math.PI*11 -useT*1.6))
+       +0.16*Math.abs(Math.sin(norm*Math.PI*19 -useT*2.2))
+       +0.12*Math.abs(Math.sin(norm*Math.PI*3  +useT*0.6));
+      colAmps[c]=Math.min(1,colAmps[c]);
+    }
+  }
+
+  for(var k=0;k<logoPts.length;k++){
+    var p=logoPts[k];
+    var col=p.col, row=p.row;
+    var colNorm=col/(LOGO_COLS-1);
+    var cAmp=colAmps[col];
+
+    /* path tangent via central difference — more stable at endpoints */
+    var iPrev=Math.max(col-1, 0);
+    var iNext=Math.min(col+1, LOGO_COLS-1);
+    var pPrev=logoPts[row*LOGO_COLS + iPrev];
+    var pNext=logoPts[row*LOGO_COLS + iNext];
+    var tdx=(pNext.x-pPrev.x)*scale, tdy=(pNext.y-pPrev.y)*scale;
+    var tlen=Math.sqrt(tdx*tdx+tdy*tdy)||0.001;
+    var tanX=tdx/tlen, tanY=tdy/tlen;   // unit tangent (along path)
+    var normX=-tanY,   normY=tanX;      // unit normal  (across path)
+
+    /* wave displacement ALONG the tangent — ripple travels with the path */
+    var ph1=colNorm*Math.PI*8  - useT*2.0 + p.phase*0.3;
+    var ph2=colNorm*Math.PI*14 + useT*1.4 + p.phase*0.5;
+    var disp = Math.sin(ph1)*cAmp*maxDisp*0.75
+             + Math.sin(ph2)*cAmp*maxDisp*0.25;
+
+    /* row layer offset stays across-path so rows keep thickness */
+    var layerOff=(row-(LOGO_ROWS-1)*0.5)*layerSpread;
+
+    /* base screen position on path */
+    var bx=ox+p.x*scale;
+    var by=oy+p.y*scale;
+
+    /* tangent = along path direction, normal = across path for layer spread */
+    var sx=bx + tanX*disp  + normX*layerOff;
+    var sy=by + tanY*disp  + normY*layerOff;
+
+    /* brightness — same as wave */
+    var bright=Math.min(1.0, 0.55+cAmp*0.55);
+
+    /* alpha — same as wave: 72% solid, 28% ghost */
+    var alpha;
+    if(p.sr<0.72){
+      alpha=0.78+bright*0.22;
+    } else {
+      alpha=0.35+bright*0.35;
+    }
+
+    /* depth mask: path endpoints fade to 0 (the spatial crossing effect) */
+    var depthMask=Math.pow(Math.sin(p.t*Math.PI), 0.55);
+    /* also fade edges of wave horizontally like wave does */
+    alpha *= depthMask;
+
+    if(alpha<0.025) continue;
+
+    var v=Math.floor(140+bright*115);
+    /* dot size — same as wave */
+    var psz=p.sz*Math.max(0.5, 0.8+cAmp*0.9);
+
+    c2d.globalAlpha=Math.min(alpha,1);
+    c2d.fillStyle=dotColor(v);
+    c2d.beginPath();c2d.arc(sx,sy,psz*0.5,0,Math.PI*2);c2d.fill();
+  }
+  c2d.globalAlpha=1;
+}
+
+/* ══════════════════════════════════════
+   FREEZE / DOWNLOAD
+══════════════════════════════════════ */
+var frozen=false,snap=null;
+function toggleFreeze(){
+  frozen=!frozen;
+  var fb=document.getElementById('frozen-badge');
+  var btn=document.getElementById('frz-btn');
+  var dl=document.getElementById('dl-btn');
+  if(frozen){
+    snap={t:T,amp:sAmp,rx:RX,ry:RY};
+    btn.innerHTML='&#9654;&thinsp; Resume'; btn.classList.add('fon');
+    fb.classList.add('show'); dl.classList.add('show');
+  }else{
+    btn.innerHTML='&#9646;&#9646;&thinsp; Freeze'; btn.classList.remove('fon');
+    fb.classList.remove('show'); dl.classList.remove('show');
+  }
+}
+function downloadHD(){
+  var SZ=2048, off=document.createElement('canvas');
+  var ctx2=off.getContext('2d'), fname;
+  if(currentTab==='wave'){
+    off.width=SZ; off.height=Math.round(SZ*H/W);
+    drawWave(ctx2,off.width,off.height,T,sAmp);
+    fname='soundwave_2048.png';
+  } else if(currentTab==='logo'){
+    off.width=SZ; off.height=Math.round(SZ*H/W);
+    drawLogo(ctx2,off.width,off.height,T,sAmp);
+    fname='logo_particles_2048.png';
+  } else if(currentTab==='ascii'){
+    off.width=SZ; off.height=Math.round(SZ*H/W);
+    drawAscii(ctx2,off.width,off.height,T,sAmp);
+    fname='ascii_sphere_2048.png';
+  } else if(currentTab==='dots'){
+    off.width=SZ; off.height=Math.round(SZ*H/W);
+    drawDots(ctx2,SZ,Math.round(SZ*H/W),T,sAmp);
+    fname='dots_sphere_2048.png';
+  } else if(currentTab==='emoji'){
+    off.width=SZ; off.height=Math.round(SZ*H/W);
+    drawEmoji(ctx2,SZ,Math.round(SZ*H/W),T,sAmp);
+    fname='emoji_sphere_2048.png';
+  } else {
+    off.width=off.height=SZ;
+    var s=snap||{t:T,amp:sAmp,rx:RX,ry:RY};
+    drawSphere(ctx2,SZ,SZ,SZ/2,SZ/2,SZ*0.34,s.t,s.amp,s.rx,s.ry);
+    fname='hollow_sphere_2048.png';
+  }
+  off.toBlob(function(blob){
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=fname;
+    a.click(); URL.revokeObjectURL(a.href);
+  },'image/png');
+}
+
+
+/* ══════════════════════════════════════
+   ASCII SPHERE TAB  (Tab 4)
+
+   Reference: sphere filled with equal-size monospace chars (0, 1, SOLO)
+   - Characters on a regular latitude/longitude grid → row×col feel
+   - Perspective: chars nearer camera slightly larger (subtle)
+   - Solid filled sphere, NOT hollow
+   - Animated flowing gradient BG: blue → teal → yellow-green
+   - Slow Y-axis rotation (3D spin)
+   - Mouse drag to rotate
+══════════════════════════════════════ */
+
+// Character pool: only 0, 1, and letters from "SOLO"
+var ASCII_POOL = ['{','}','(',')','[',']','<','>','/','\\','=','+','-','*','&','|',';',':','!','?','#','@','%','^','~','`','_','.','0','1','2'];
+
+// Grid: latitude rows × longitude cols
+var A_ROWS = 22, A_COLS = 34;
+var asciiPts = [];
+(function(){
+  for(var r=0;r<A_ROWS;r++){
+    // skip polar rows to avoid crowding at top/bottom
+    var phi = Math.PI * (r+1.5) / (A_ROWS+2);   // avoids poles
+    for(var c=0;c<A_COLS;c++){
+      var theta = 2*Math.PI * c / A_COLS;
+      // thin out columns near poles to avoid circle artifact
+      var sinPhi = Math.sin(phi);
+      var keepEvery = sinPhi < 0.25 ? 4 : sinPhi < 0.50 ? 2 : 1;
+      if(c % keepEvery !== 0) continue;
+      asciiPts.push({
+        bx: sinPhi*Math.cos(theta),
+        by: Math.cos(phi),
+        bz: sinPhi*Math.sin(theta),
+        row: r, col: c,
+        ch: ASCII_POOL[Math.floor(Math.random()*ASCII_POOL.length)],
+        no: Math.random()*100
+      });
+    }
+  }
+})();
+
+// Rotation state for ASCII tab
+var aRX=0.18, aRY=0, atRX=0.18, atRY=0;
+var aDrag=false, aLmx=0, aLmy=0;
+
+// Hook drag events when ascii tab is active
+function setupAsciiDrag(){
+  C.addEventListener('mousedown',function(e){
+    if(currentTab!=='ascii') return;
+    aDrag=true; aLmx=e.clientX; aLmy=e.clientY;
+    document.body.classList.add('dragging');
+  });
+  window.addEventListener('mousemove',function(e){
+    if(!aDrag||currentTab!=='ascii') return;
+    atRY+=(e.clientX-aLmx)*0.005; atRX+=(e.clientY-aLmy)*0.005;
+    aLmx=e.clientX; aLmy=e.clientY;
+  });
+  window.addEventListener('mouseup',function(){
+    if(currentTab==='ascii'){ aDrag=false; document.body.classList.remove('dragging'); }
+  });
+}
+setupAsciiDrag();
+
+/* ── paint blobs: mouse leaves colour trails ── */
+var paintBlobs = [];
+var PAINT_COLORS = [
+  [80,180,230],   // blue
+  [74,184,160],   // teal
+  [138,191,96],   // green
+  [200,212,74],   // yellow-green
+  [255,210,80],   // warm yellow
+  [120,200,255],  // sky
+  [180,240,160],  // lime
+];
+var lastPaintX=-1, lastPaintY=-1, paintColorIdx=0;
+
+function onAsciiMouseMove(e){
+  if(currentTab!=='ascii') return;
+  var mx=e.clientX, my=e.clientY;
+  // only spawn if moved enough
+  var dx=mx-lastPaintX, dy=my-lastPaintY;
+  if(dx*dx+dy*dy < 400) return;
+  lastPaintX=mx; lastPaintY=my;
+  // pick a color from the palette, cycling + slight randomness
+  var ci=(paintColorIdx + Math.floor(Math.random()*2)) % PAINT_COLORS.length;
+  paintColorIdx=(paintColorIdx+1)%PAINT_COLORS.length;
+  var col=PAINT_COLORS[ci];
+  paintBlobs.push({
+    x: mx, y: my,
+    r: 0,                          // current radius
+    maxR: Math.min(W,H)*(0.18+Math.random()*0.18),  // how far it spreads
+    speed: Math.min(W,H)*(0.004+Math.random()*0.004), // px per frame
+    alpha: 0.55+Math.random()*0.25,
+    col: col,
+    born: Date.now()
+  });
+  // keep at most 18 blobs
+  if(paintBlobs.length>18) paintBlobs.shift();
+}
+window.addEventListener('mousemove', onAsciiMouseMove);
+
+/* ── flowing gradient background ── */
+function drawAsciiBG(c2d,cW,cH,useT){
+  // Base: blue-teal linear
+  var g0=c2d.createLinearGradient(0,0,cW,cH);
+  g0.addColorStop(0.00,'#3a8fc7');
+  g0.addColorStop(0.40,'#4ab8a0');
+  g0.addColorStop(0.75,'#8abf60');
+  g0.addColorStop(1.00,'#c8d44a');
+  c2d.fillStyle=g0; c2d.fillRect(0,0,cW,cH);
+
+  // Animated blob 1: bright teal, drifts top-right
+  var b1x=cW*(0.70+0.12*Math.sin(useT*0.17));
+  var b1y=cH*(0.15+0.10*Math.cos(useT*0.13));
+  var b1r=Math.min(cW,cH)*0.50;
+  var rg1=c2d.createRadialGradient(b1x,b1y,0,b1x,b1y,b1r);
+  rg1.addColorStop(0,'rgba(180,220,255,0.42)');
+  rg1.addColorStop(1,'rgba(180,220,255,0.00)');
+  c2d.fillStyle=rg1; c2d.fillRect(0,0,cW,cH);
+
+  // Animated blob 2: warm yellow, drifts bottom-right
+  var b2x=cW*(0.85+0.08*Math.cos(useT*0.11));
+  var b2y=cH*(0.80+0.08*Math.sin(useT*0.19));
+  var b2r=Math.min(cW,cH)*0.45;
+  var rg2=c2d.createRadialGradient(b2x,b2y,0,b2x,b2y,b2r);
+  rg2.addColorStop(0,'rgba(220,240,100,0.50)');
+  rg2.addColorStop(1,'rgba(220,240,100,0.00)');
+  c2d.fillStyle=rg2; c2d.fillRect(0,0,cW,cH);
+
+  // Animated blob 3: soft white glow centre-left
+  var b3x=cW*(0.18+0.10*Math.sin(useT*0.09+1));
+  var b3y=cH*(0.55+0.12*Math.cos(useT*0.14+2));
+  var b3r=Math.min(cW,cH)*0.40;
+  var rg3=c2d.createRadialGradient(b3x,b3y,0,b3x,b3y,b3r);
+  rg3.addColorStop(0,'rgba(255,255,230,0.30)');
+  rg3.addColorStop(1,'rgba(255,255,230,0.00)');
+  c2d.fillStyle=rg3; c2d.fillRect(0,0,cW,cH);
+
+  // Paint blobs — expand radially then fade out
+  for(var b=paintBlobs.length-1;b>=0;b--){
+    var blob=paintBlobs[b];
+    // grow radius
+    blob.r += blob.speed;
+    // fade alpha as it expands toward maxR
+    var progress = blob.r / blob.maxR;  // 0..1+
+    if(progress>=1.2){ paintBlobs.splice(b,1); continue; }
+    // alpha: ramp up 0→0.3 then fade out 0.3→1.2
+    var a;
+    if(progress<0.3){
+      a = blob.alpha * (progress/0.3);
+    } else {
+      a = blob.alpha * (1-(progress-0.3)/0.9);
+    }
+    a = Math.max(0,a);
+    var c=blob.col;
+    var rg=c2d.createRadialGradient(blob.x,blob.y,0, blob.x,blob.y,blob.r);
+    rg.addColorStop(0.0,'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')');
+    rg.addColorStop(0.5,'rgba('+c[0]+','+c[1]+','+c[2]+','+(a*0.4)+')');
+    rg.addColorStop(1.0,'rgba('+c[0]+','+c[1]+','+c[2]+',0)');
+    c2d.fillStyle=rg;
+    c2d.fillRect(0,0,cW,cH);
+  }
+}
+
+function drawAscii(c2d,cW,cH,useT,useAmp){
+  drawAsciiBG(c2d,cW,cH,useT);
+
+  // auto-rotate Y axis only (like reference)
+  if(!aDrag){ atRY+=0.004; }
+  aRX+=(atRX-aRX)*0.07; aRY+=(atRY-aRY)*0.07;
+
+  var sphR=Math.min(cW,cH)*0.38;
+  var ccx=cW/2, ccy=cH/2;
+  var fov=Math.min(cW,cH)*1.3;
+
+  // Fixed char size — same for all characters (matching reference)
+  // Slightly larger at front due to perspective, but NOT hollow mask
+  var baseFont=Math.max(6, Math.min(cW,cH)*0.013);
+
+  var cosRX=Math.cos(aRX), sinRX=Math.sin(aRX);
+  var cosRY=Math.cos(aRY), sinRY=Math.sin(aRY);
+
+  var items=[];
+  for(var i=0;i<asciiPts.length;i++){
+    var p=asciiPts[i];
+
+    // subtle noise warp on sphere surface
+    var nt=useT*0.08;
+    var n0=vn(p.bx*2+nt, p.by*2+nt*0.8, p.bz*2+p.no);
+    var warp=(n0*2-1)*0.025 + useAmp*0.04;
+    var r=sphR*(1+warp);
+
+    // rotate Y then X
+    var bx=p.bx, by=p.by, bz=p.bz;
+    // Y rotation
+    var x1= bx*cosRY + bz*sinRY;
+    var z1=-bx*sinRY + bz*cosRY;
+    // X rotation
+    var y2= by*cosRX - z1*sinRX;
+    var z2= by*sinRX + z1*cosRX;
+    var rx3=x1, ry3=y2, rz=z2;
+
+    // No back-face cull — we want FULL sphere (solid, not hollow)
+    // But cull strictly behind camera
+    var zOff=fov*1.4, dep=rz*sphR+zOff;
+    if(dep<=0) continue;
+    var sc=fov/dep;
+    var sx=ccx+rx3*r*sc, sy=ccy+ry3*r*sc;
+
+    // depth for sort + alpha
+    // front (rz>0): fully visible; back (rz<0): slightly faded
+    var depthAlpha = 0.55 + 0.45*((rz+1)*0.5);  // 0.55 at back, 1.0 at front
+
+    // Subtle perspective size variation (±20%) — keeps chars "equal" but 3D
+    var perspSize = baseFont * (0.88 + 0.24*((rz+1)*0.5));
+
+    items.push({sx:sx,sy:sy,rz:rz,alpha:depthAlpha,fsize:perspSize,ch:p.ch});
+  }
+
+  // back to front
+  items.sort(function(a,b){return a.rz-b.rz;});
+
+  // Set font once (all same size per frame — matches reference equal-size chars)
+  var fs=Math.round(baseFont);
+  c2d.font='300 '+fs+'px "SF Mono","SF Pro Text",ui-monospace,system-ui,monospace';
+  c2d.textAlign='center';
+  c2d.textBaseline='middle';
+
+  for(var d=0;d<items.length;d++){
+    var it=items[d];
+    c2d.globalAlpha=Math.min(it.alpha,1);
+    c2d.fillStyle='rgba(255,255,255,1)';
+    // slightly adjust font size per char for subtle depth
+    var fs2=Math.round(it.fsize);
+    if(fs2!==fs){ fs=fs2; c2d.font='300 '+fs+'px "SF Mono","SF Pro Text",ui-monospace,system-ui,monospace'; }
+    c2d.fillText(it.ch, it.sx, it.sy);
+  }
+
+  c2d.globalAlpha=1;
+  c2d.textAlign='left';
+  c2d.textBaseline='alphabetic';
+}
+
+
+
+/* ══════════════════════════════════════
+   DOTS TAB — ASCII sphere variant
+   Same rotating sphere, same gradient BG (blue tones),
+   particles are circles instead of characters,
+   same mouse-paint interaction, same audio reactivity.
+══════════════════════════════════════ */
+
+// Reuse asciiPts grid (A_ROWS × A_COLS already built for ASCII tab)
+// dotsBG uses blue-only palette
+
+var DOTS_PAINT_COLORS = [
+  [153,128,255],   // #9980FF purple (fresh trail)
+  [140,118,248],   // purple-blue transition
+  [110,105,235],   // mid purple-blue
+  [80, 120,225],   // blue-purple
+  [55, 140,215],   // blue
+  [40, 160,225],   // sky blue
+  [50, 180,240],   // light blue (faded out)
+];
+var dotsPaintBlobs=[], dotsLastX=-1, dotsLastY=-1, dotsPaintIdx=0;
+
+function onDotsMouseMove(e){
+  if(currentTab!=='dots') return;
+  var mx=e.clientX, my=e.clientY;
+  var dx=mx-dotsLastX, dy=my-dotsLastY;
+  if(dx*dx+dy*dy < 400) return;
+  dotsLastX=mx; dotsLastY=my;
+  var ci=(dotsPaintIdx+Math.floor(Math.random()*2))%DOTS_PAINT_COLORS.length;
+  dotsPaintIdx=(dotsPaintIdx+1)%DOTS_PAINT_COLORS.length;
+  var col=DOTS_PAINT_COLORS[ci];
+  dotsPaintBlobs.push({
+    x:mx,y:my,r:0,
+    maxR:Math.min(W,H)*(0.18+Math.random()*0.18),
+    speed:Math.min(W,H)*(0.004+Math.random()*0.004),
+    alpha:0.55+Math.random()*0.25,
+    col:col
+  });
+  if(dotsPaintBlobs.length>18) dotsPaintBlobs.shift();
+}
+window.addEventListener('mousemove',onDotsMouseMove);
+
+function drawDotsBG(c2d,cW,cH,useT){
+  // Blue-toned gradient base
+  var g0=c2d.createLinearGradient(0,0,cW,cH);
+  g0.addColorStop(0.00,'#1a3a6e');   // deep navy
+  g0.addColorStop(0.35,'#2a6ab5');   // medium blue
+  g0.addColorStop(0.70,'#3a9ad4');   // sky blue
+  g0.addColorStop(1.00,'#5bc8f0');   // light cyan-blue
+  c2d.fillStyle=g0; c2d.fillRect(0,0,cW,cH);
+
+  // Blob 1: bright sky blue, drifts top-right
+  var b1x=cW*(0.68+0.12*Math.sin(useT*0.17));
+  var b1y=cH*(0.14+0.10*Math.cos(useT*0.13));
+  var b1r=Math.min(cW,cH)*0.50;
+  var rg1=c2d.createRadialGradient(b1x,b1y,0,b1x,b1y,b1r);
+  rg1.addColorStop(0,'rgba(100,200,255,0.45)');
+  rg1.addColorStop(1,'rgba(100,200,255,0.00)');
+  c2d.fillStyle=rg1; c2d.fillRect(0,0,cW,cH);
+
+  // Blob 2: deep indigo, drifts bottom-left
+  var b2x=cW*(0.18+0.08*Math.cos(useT*0.11));
+  var b2y=cH*(0.78+0.08*Math.sin(useT*0.19));
+  var b2r=Math.min(cW,cH)*0.45;
+  var rg2=c2d.createRadialGradient(b2x,b2y,0,b2x,b2y,b2r);
+  rg2.addColorStop(0,'rgba(40,60,180,0.50)');
+  rg2.addColorStop(1,'rgba(40,60,180,0.00)');
+  c2d.fillStyle=rg2; c2d.fillRect(0,0,cW,cH);
+
+  // Blob 3: periwinkle, drifts centre
+  var b3x=cW*(0.50+0.10*Math.sin(useT*0.09+1));
+  var b3y=cH*(0.45+0.12*Math.cos(useT*0.14+2));
+  var b3r=Math.min(cW,cH)*0.38;
+  var rg3=c2d.createRadialGradient(b3x,b3y,0,b3x,b3y,b3r);
+  rg3.addColorStop(0,'rgba(140,160,240,0.35)');
+  rg3.addColorStop(1,'rgba(140,160,240,0.00)');
+  c2d.fillStyle=rg3; c2d.fillRect(0,0,cW,cH);
+
+  // Mouse paint blobs: centre = #9980FF purple, edge fades to background blue
+  for(var b=dotsPaintBlobs.length-1;b>=0;b--){
+    var blob=dotsPaintBlobs[b];
+    blob.r+=blob.speed;
+    var progress=blob.r/blob.maxR;
+    if(progress>=1.2){dotsPaintBlobs.splice(b,1);continue;}
+    // alpha envelope: ramp up then fade
+    var a;
+    if(progress<0.3) a=blob.alpha*(progress/0.3);
+    else             a=blob.alpha*(1-(progress-0.3)/0.9);
+    a=Math.max(0,a);
+    // purple core → blue-purple mid → sky blue edge (matching bg)
+    // centre: #9980FF = rgb(153,128,255)
+    // mid:    rgb(80,120,225)   blue-purple
+    // edge:   rgb(50,170,235)   sky blue (blends into bg)
+    var rg=c2d.createRadialGradient(blob.x,blob.y,0,blob.x,blob.y,blob.r);
+    rg.addColorStop(0.00,'rgba(153,128,255,'+a+')');
+    rg.addColorStop(0.30,'rgba(110,118,245,'+(a*0.80)+')');
+    rg.addColorStop(0.60,'rgba(70,130,230,'+(a*0.45)+')');
+    rg.addColorStop(0.85,'rgba(50,165,235,'+(a*0.18)+')');
+    rg.addColorStop(1.00,'rgba(50,170,240,0)');
+    c2d.fillStyle=rg; c2d.fillRect(0,0,cW,cH);
+  }
+}
+
+// Rotation state for Dots tab
+var dotsRX=0.18, dotsRY=0, dotsTRX=0.18, dotsTRY=0;
+
+function drawDots(c2d,cW,cH,useT,useAmp){
+  drawDotsBG(c2d,cW,cH,useT);
+
+  // no auto-rotation — only rotate when dragging
+  dotsRX+=(dotsTRX-dotsRX)*0.07; dotsRY+=(dotsTRY-dotsRY)*0.07;
+
+  var sphR=Math.min(cW,cH)*0.38;
+  var ccx=cW/2, ccy=cH/2;
+  var fov=Math.min(cW,cH)*1.3;
+  var baseSize=Math.max(1, Math.min(cW,cH)*0.003);
+
+  var cosRX=Math.cos(dotsRX), sinRX=Math.sin(dotsRX);
+  var cosRY=Math.cos(dotsRY), sinRY=Math.sin(dotsRY);
+
+  var items=[];
+  for(var i=0;i<asciiPts.length;i++){
+    var p=asciiPts[i];
+    var nt=useT*0.08;
+    var n0=vn(p.bx*2+nt, p.by*2+nt*0.8, p.bz*2+p.no);
+    var warp=(n0*2-1)*0.025+useAmp*0.04;
+    var r=sphR*(1+warp);
+
+    var bx=p.bx, by=p.by, bz=p.bz;
+    var x1= bx*cosRY + bz*sinRY;
+    var z1=-bx*sinRY + bz*cosRY;
+    var y2= by*cosRX - z1*sinRX;
+    var z2= by*sinRX + z1*cosRX;
+
+    var zOff=fov*1.4, dep=z2*sphR/Math.min(cW,cH)+zOff;
+    if(dep<=0) continue;
+    var sc=fov/dep;
+    var sx=ccx+(x1*r/Math.min(cW,cH))*fov/dep*Math.min(cW,cH);
+    var sy=ccy+(y2*r/Math.min(cW,cH))*fov/dep*Math.min(cW,cH);
+
+    // recompute properly
+    var rx3=x1, ry3=y2, rz3=z2;
+    var zOff2=fov*1.4, dep2=rz3*sphR+zOff2;
+    if(dep2<=0) continue;
+    var sc2=fov/dep2;
+    sx=ccx+rx3*r*sc2; sy=ccy+ry3*r*sc2;
+
+    // random size per particle (stable via index), smaller overall
+    var randSz = 0.3 + ((i*2654435761)%1000)/1000*1.2;  // 0.3..1.5 pseudo-random
+    var dotR = baseSize * randSz * (0.75+0.35*((rz3+1)*0.5));
+
+    // random highlight: ~8% of particles flash (colour only, no alpha change)
+    var hlSeed = ((i*1664525+1013904223)&0x7fffffff)%100;
+    var highlight = hlSeed < 8;
+    var flicker = highlight ? Math.max(0, Math.sin(useT*3.0 + hlSeed*0.4)) : 0;
+    var finalR = dotR * (highlight && flicker>0.5 ? 1.4 : 1.0);
+    items.push({sx:sx,sy:sy,rz:rz3,alpha:1.0,dotR:finalR,hl:highlight&&flicker>0.5});
+  }
+
+  items.sort(function(a,b){return a.rz-b.rz;});
+
+  for(var d=0;d<items.length;d++){
+    var it=items[d];
+    c2d.globalAlpha=Math.min(it.alpha,1);
+    c2d.fillStyle=it.hl ? '#9980FF' : 'rgba(255,255,255,1)';
+    c2d.beginPath(); c2d.arc(it.sx,it.sy,it.dotR,0,Math.PI*2); c2d.fill();
+  }
+  c2d.globalAlpha=1;
+}
+
+/* ══════════════════════════════════════
+   EMOJI TAB — sphere filled with emoji characters
+   Orange-yellow gradient background with floating blobs
+   Same grid as ASCII tab, slow auto-rotation
+══════════════════════════════════════ */
+
+var EMOJI_POOL = [
+  ':)',':(', ':D',':P',';)',':O',':/',':|',
+  'xD','x)','=)','=D','>_<','T_T','^_^','o_o',
+  'UwU','OwO',':3','>;)','<_<','>.>','<.<','-_-',
+  'o.o','@_@','~_~','*_*','0_0','u_u','=_=','$_$',
+  '>.<','n_n','q_q','v_v','c:','c;','8)','B)',
+];
+
+// Emoji grid: sparser grid for legibility and spacing
+var emojiPts = [];
+var E_ROWS=14, E_COLS=22;
+(function(){
+  for(var r=0;r<E_ROWS;r++){
+    var phi=Math.PI*(r+1.5)/(E_ROWS+2);
+    var sinPhi=Math.sin(phi);
+    // thin out near poles
+    var colStep = sinPhi<0.3 ? 4 : sinPhi<0.55 ? 2 : 1;
+    for(var c=0;c<E_COLS;c+=colStep){
+      var theta=2*Math.PI*c/E_COLS;
+      emojiPts.push({
+        bx: sinPhi*Math.cos(theta),
+        by: Math.cos(phi),
+        bz: sinPhi*Math.sin(theta),
+        no: Math.random()*100,
+        ch: EMOJI_POOL[Math.floor(Math.random()*EMOJI_POOL.length)],
+      });
+    }
+  }
+})();
+
+var emojiRX=0.18, emojiRY=0, emojiTRX=0.18, emojiTRY=0;
+
+function drawEmojiBG(c2d,cW,cH,useT){
+  // #667AFF based gradient: light tint → base → deeper
+  var g0=c2d.createLinearGradient(0,0,cW,cH);
+  g0.addColorStop(0.00,'#c8d0ff');   // very light tint of #667AFF
+  g0.addColorStop(0.40,'#99a8ff');   // mid tint
+  g0.addColorStop(0.75,'#667aff');   // base #667AFF
+  g0.addColorStop(1.00,'#4456e0');   // deeper blue-violet
+  c2d.fillStyle=g0; c2d.fillRect(0,0,cW,cH);
+
+  // Blob 1: deeper indigo, drifts bottom-right
+  var b1x=cW*(0.80+0.10*Math.sin(useT*0.14));
+  var b1y=cH*(0.75+0.08*Math.cos(useT*0.11));
+  var b1r=Math.min(cW,cH)*0.48;
+  var rg1=c2d.createRadialGradient(b1x,b1y,0,b1x,b1y,b1r);
+  rg1.addColorStop(0,'rgba(60,70,200,0.50)');
+  rg1.addColorStop(1,'rgba(60,70,200,0.00)');
+  c2d.fillStyle=rg1; c2d.fillRect(0,0,cW,cH);
+
+  // Blob 2: soft periwinkle, drifts top-left
+  var b2x=cW*(0.15+0.09*Math.cos(useT*0.16));
+  var b2y=cH*(0.18+0.09*Math.sin(useT*0.13));
+  var b2r=Math.min(cW,cH)*0.42;
+  var rg2=c2d.createRadialGradient(b2x,b2y,0,b2x,b2y,b2r);
+  rg2.addColorStop(0,'rgba(180,195,255,0.55)');
+  rg2.addColorStop(1,'rgba(180,195,255,0.00)');
+  c2d.fillStyle=rg2; c2d.fillRect(0,0,cW,cH);
+
+  // Blob 3: white-blue glow centre
+  var b3x=cW*(0.50+0.08*Math.sin(useT*0.09+1));
+  var b3y=cH*(0.45+0.10*Math.cos(useT*0.12+2));
+  var b3r=Math.min(cW,cH)*0.36;
+  var rg3=c2d.createRadialGradient(b3x,b3y,0,b3x,b3y,b3r);
+  rg3.addColorStop(0,'rgba(220,225,255,0.45)');
+  rg3.addColorStop(1,'rgba(220,225,255,0.00)');
+  c2d.fillStyle=rg3; c2d.fillRect(0,0,cW,cH);
+}
+
+function drawEmoji(c2d,cW,cH,useT,useAmp){
+  drawEmojiBG(c2d,cW,cH,useT);
+
+  // slow auto-rotation
+  if(!drag){ emojiTRY+=0.003; emojiTRX+=0.0005; }
+  emojiRX+=(emojiTRX-emojiRX)*0.07;
+  emojiRY+=(emojiTRY-emojiRY)*0.07;
+
+  var sphR=Math.min(cW,cH)*0.38;
+  var ccx=cW/2, ccy=cH/2;
+  var fov=Math.min(cW,cH)*1.3;
+  var baseFont=Math.max(7,Math.min(cW,cH)*0.018);
+
+  var cosRX=Math.cos(emojiRX), sinRX=Math.sin(emojiRX);
+  var cosRY=Math.cos(emojiRY), sinRY=Math.sin(emojiRY);
+
+  var items=[];
+  for(var i=0;i<emojiPts.length;i++){
+    var p=emojiPts[i];
+    var nt=useT*0.08;
+    var n0=vn(p.bx*2+nt, p.by*2+nt*0.8, p.bz*2+p.no);
+    var warp=(n0*2-1)*0.025+useAmp*0.04;
+    var r=sphR*(1+warp);
+
+    var x1= p.bx*cosRY + p.bz*sinRY;
+    var z1=-p.bx*sinRY + p.bz*cosRY;
+    var y2= p.by*cosRX - z1*sinRX;
+    var z2= p.by*sinRX + z1*cosRX;
+
+    var dep=z2*sphR+fov*1.4;
+    if(dep<=0) continue;
+    var sc=fov/dep;
+    var sx=ccx+x1*r*sc, sy=ccy+y2*r*sc;
+
+    var depthAlpha=0.55+0.45*((z2+1)*0.5);
+    var fsize=baseFont*(0.80+0.35*((z2+1)*0.5));
+
+    items.push({sx:sx,sy:sy,rz:z2,alpha:depthAlpha,fsize:fsize,ch:p.ch});
+  }
+
+  items.sort(function(a,b){return a.rz-b.rz;});
+
+  var curFs=-1;
+  c2d.textAlign='center';
+  c2d.textBaseline='middle';
+
+  for(var d=0;d<items.length;d++){
+    var it=items[d];
+    var fs=Math.round(it.fsize);
+    if(fs!==curFs){
+      c2d.font=fs+'px serif';
+      curFs=fs;
+    }
+    c2d.globalAlpha=Math.min(it.alpha,1);
+    c2d.fillStyle='#ffffff';
+    c2d.fillText(it.ch,it.sx,it.sy);
+  }
+  c2d.globalAlpha=1;
+  c2d.textAlign='left';
+  c2d.textBaseline='alphabetic';
+}
+
+/* ══════════════════════════════════════
+   VIDEO RECORDING  (MediaRecorder → WebM)
+   Max 10 seconds, records live canvas
+══════════════════════════════════════ */
+var mediaRecorder=null, recChunks=[], recTimer=null, recSeconds=0;
+var MAX_REC_SEC=10;
+
+function toggleRecord(){
+  if(mediaRecorder && mediaRecorder.state==='recording'){
+    stopRecord();
+  } else {
+    startRecord();
+  }
+}
+
+function startRecord(){
+  recChunks=[];
+  var stream=C.captureStream(60);
+  var opts={mimeType:'video/webm;codecs=vp9'};
+  if(!MediaRecorder.isTypeSupported(opts.mimeType)){
+    opts={mimeType:'video/webm'};
+  }
+  mediaRecorder=new MediaRecorder(stream, opts);
+  mediaRecorder.ondataavailable=function(e){ if(e.data&&e.data.size>0) recChunks.push(e.data); };
+  mediaRecorder.onstop=function(){ saveVideo(); };
+  mediaRecorder.start(100);
+
+  var btn=document.getElementById('rec-btn');
+  btn.classList.add('recording');
+  recSeconds=0;
+  updateRecLabel();
+  recTimer=setInterval(function(){
+    recSeconds++;
+    updateRecLabel();
+    if(recSeconds>=MAX_REC_SEC) stopRecord();
+  },1000);
+}
+
+function stopRecord(){
+  if(!mediaRecorder||mediaRecorder.state==='inactive') return;
+  clearInterval(recTimer);
+  mediaRecorder.stop();
+  var btn=document.getElementById('rec-btn');
+  btn.classList.remove('recording');
+  btn.innerHTML='&#9679;&thinsp; Record';
+}
+
+function updateRecLabel(){
+  var rem=MAX_REC_SEC-recSeconds;
+  document.getElementById('rec-btn').innerHTML='&#9632;&thinsp; Stop ('+rem+'s)';
+}
+
+function saveVideo(){
+  var blob=new Blob(recChunks,{type:'video/webm'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='particle_'+currentTab+'_'+Date.now()+'.webm';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ══════════════════════════════════════
+   MAIN LOOP
+══════════════════════════════════════ */
+var T=0,sAmp=0;
+(function loop(){
+  requestAnimationFrame(loop);
+  if(analyser) analyser.getByteFrequencyData(fdata);
+  var raw=getAmp();
+  var syn=0.12+Math.sin(T*1.3)*0.09+Math.sin(T*2.8)*0.05+Math.sin(T*0.6)*0.06;
+  sAmp+=((micOn?raw:Math.max(0,syn))-sAmp)*0.09;
+  if(!drag){tRY+=0.0035; tRX+=0.0007;}
+  RX+=(tRX-RX)*0.07; RY+=(tRY-RY)*0.07;
+
+  if(currentTab==='sphere'){
+    if(frozen){
+      var s=snap||{t:T,amp:sAmp,rx:RX,ry:RY};
+      drawSphere(X,W,H,cx,cy,R,s.t,s.amp,s.rx,s.ry);
+    } else {
+      T+=0.013;
+      drawSphere(X,W,H,cx,cy,R,T,sAmp,RX,RY);
+    }
+  } else if(currentTab==='logo'){
+    T+=0.013;
+    drawLogo(X,W,H,T,sAmp);
+  } else if(currentTab==='ascii'){
+    T+=0.013;
+    drawAscii(X,W,H,T,sAmp);
+  } else if(currentTab==='dots'){
+    T+=0.013;
+    drawDots(X,W,H,T,sAmp);
+  } else if(currentTab==='emoji'){
+    T+=0.013;
+    drawEmoji(X,W,H,T,sAmp);
+  } else {
+    T+=0.013;
+    drawWave(X,W,H,T,sAmp);
+  }
+})();
+</script>
+</body>
+</html>
